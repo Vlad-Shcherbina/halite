@@ -1,0 +1,5 @@
+Halite-C++-Starter-Package/
+HaliteEnvironment-Source/
+*.o
+halite
+*.hlt

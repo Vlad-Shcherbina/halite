@@ -92,7 +92,7 @@ namespace detail{
     }
     static void sendString(const std::string & sendString) {
         if(sendString.length() < 1) std::cout << ' ' << std::endl; //Automatically flushes.
-        else std::cout << sendString << std::endl; //Automatically flushes.
+        else std::cout << sendString.c_str() << std::endl; //Automatically flushes.
     }
 
     static std::string getString() {

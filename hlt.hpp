@@ -5,6 +5,8 @@
 #include <vector>
 #include <random>
 
+#include <math.h>
+
 #define STILL 0
 #define NORTH 1
 #define EAST 2

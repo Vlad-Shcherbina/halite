@@ -1,5 +1,7 @@
 Halite-C++-Starter-Package/
 HaliteEnvironment-Source/
 *.o
+z.zip
 halite
 *.hlt
+*.log

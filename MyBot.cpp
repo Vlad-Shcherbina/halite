@@ -29,6 +29,9 @@ ofstream dbg("zzz.log");
 unsigned char myID;
 int width;
 int height;
+vector<int> production;
+vector<int> owner;
+vector<int> strength;
 
 using Loc = int;
 
@@ -73,7 +76,7 @@ struct Opener {
         int evaluate(int ahead) const {
             int result = 0;
             for (Loc p : own)
-                result += strength(p) + ahead * op->production[p];
+                result += strength(p) + ahead * production[p];
             return result;
         }
 
@@ -81,14 +84,14 @@ struct Opener {
             if (strength_diff.count(p))
                 return strength_diff.at(p);
             else
-                return op->base_strength[p];
+                return ::strength[p];
         }
         vector<State> successors() const {
             State s = *this;
             s.moves.emplace_back();
             for (Loc p : own)
                 s.strength_diff[p] =
-                    min(s.strength(p) + op->production[p], 255);
+                    min(s.strength(p) + production[p], 255);
 
             vector<State> result {s};
 
@@ -138,24 +141,16 @@ struct Opener {
         }
     };
 
-    hlt::GameMap &game_map;
-    vector<int> base_strength;
-    vector<int> production;
     State initial;
 
-    Opener(hlt::GameMap &game_map) : game_map(game_map) {
-        base_strength.resize(height * width);
-        production.resize(height * width);
+    Opener() {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Loc p = pack(x, y);
-                auto &site = game_map.getSite(unpack_loc(p));
-                if (site.owner == myID) {
-                    initial.own.insert(pack(x, y));
-                    initial.strength_diff[pack(x, y)] = site.strength;
+                if (owner[p] == myID) {
+                    initial.own.insert(p);
+                    initial.strength_diff[p] = strength[p];
                 }
-                base_strength[p] = site.strength;
-                production[p] = site.production;
             }
         }
         initial.op = this;
@@ -194,13 +189,28 @@ ostream &operator<<(ostream &out, const Opener::State &state) {
 }
 
 
+void init_globals(hlt::GameMap &game_map) {
+    ::width = game_map.width;
+    ::height = game_map.height;
+    int n = width * height;
+    ::strength.resize(n);
+    ::production.resize(n);
+    ::owner.resize(n);
+    for (Loc p = 0; p < n; p++) {
+        auto &site = game_map.getSite(unpack_loc(p));
+        ::strength[p] = site.strength;
+        ::production[p] = site.production;
+        ::owner[p] = site.owner;
+    }
+}
+
+
 int main() {
     std::cout.sync_with_stdio(0);
 
     hlt::GameMap presentMap;
     getInit(::myID, presentMap);
-    ::width = presentMap.width;
-    ::height = presentMap.height;
+    init_globals(presentMap);
     sendInit("asdf.");
 
     mt19937 engine;
@@ -209,9 +219,10 @@ int main() {
     while(true) {
         dbg << "-------------" << endl;
         getFrame(presentMap);
+        init_globals(presentMap);
         std::set<hlt::Move> moves;
 
-        Opener opener {presentMap};
+        Opener opener;
         if (opener.initial.own.size() < 30) {
             debug(opener.initial);
             auto s = opener.solve();

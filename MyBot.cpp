@@ -66,6 +66,14 @@ Dir opposite(Dir dir) {
     return ((dir - 1) ^ 2) + 1;
 }
 
+// TODO: more efficient
+Loc move_dst(Loc src, Dir d) {
+    assert(d >= 1 && d <= 4);
+    return neighbors(src)[d - 1];
+}
+Loc move_src(Loc dst, Dir d) {
+    return move_dst(dst, opposite(d));
+}
 
 void init_globals(hlt::GameMap &game_map) {
     ::width = game_map.width;
@@ -159,7 +167,7 @@ map<Loc, Dir> generate_attack_moves() {
                 map<Loc, Dir> mv;
                 bool valid = true;
                 for (Dir d : ds) {
-                    Loc from = neighbors(c)[opposite(d) - 1];
+                    Loc from = move_src(c, d);
                     if (owner[from] != myID || strength[from] == 0)
                         valid = false;
                     if (moves.count(from))
@@ -184,10 +192,8 @@ map<Loc, Dir> generate_attack_moves() {
             break;
         }
 
-        for (auto kv : best_moves) {
-            Loc to = neighbors(kv.first)[kv.second - 1];
-            candidates.erase(to);
-        }
+        for (auto kv : best_moves)
+            candidates.erase(move_dst(kv.first, kv.second));
         moves.insert(begin(best_moves), end(best_moves));
     }
 
@@ -205,7 +211,7 @@ map<Loc, Dir> generate_reinforcement_moves() {
         float best_score = -1e10;
         Dir best_dir = 0;
         for (Dir d : CARDINALS) {
-            Loc to = neighbors(p)[d - 1];
+            Loc to = move_dst(p, d);
             if (distance_to_border[to] >= distance_to_border[p])
                 continue;
             float score = 1000 - abs(strength[to] - 128);

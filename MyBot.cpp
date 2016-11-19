@@ -26,21 +26,23 @@ ofstream dbg("zzz.log");
          << ", " #z " = " << (z) << std::endl
 
 
-unsigned char myID;
+int myID;
 int width;
 int height;
+int area;
 vector<int> production;
 vector<int> owner;
 vector<int> strength;
 
 using Loc = int;
+using Dir = int;
 
 Loc pack(int x, int y) {
     return x + width * y;
 }
 hlt::Location unpack_loc(Loc p) {
     assert(p >= 0);
-    assert(p < width * height);
+    assert(p < area);
     hlt::Location res;
     res.x = p % width;
     res.y = p / width;
@@ -58,7 +60,7 @@ array<Loc, 4> neighbors(Loc p) {
     return result;
 }
 
-int opposite(int dir) {
+Dir opposite(Dir dir) {
     assert(dir >= 1 && dir <= 4);
     return ((dir - 1) ^ 2) + 1;
 }
@@ -67,11 +69,11 @@ int opposite(int dir) {
 void init_globals(hlt::GameMap &game_map) {
     ::width = game_map.width;
     ::height = game_map.height;
-    int n = width * height;
-    ::strength.resize(n);
-    ::production.resize(n);
-    ::owner.resize(n);
-    for (Loc p = 0; p < n; p++) {
+    ::area = width * height;
+    ::strength.resize(area);
+    ::production.resize(area);
+    ::owner.resize(area);
+    for (Loc p = 0; p < area; p++) {
         auto &site = game_map.getSite(unpack_loc(p));
         ::strength[p] = site.strength;
         ::production[p] = site.production;
@@ -80,11 +82,26 @@ void init_globals(hlt::GameMap &game_map) {
 }
 
 
+void send_moves(map<Loc, Dir> moves) {
+    std::set<hlt::Move> hlt_moves;
+    for (auto kv : moves) {
+        Loc p = kv.first;
+        Dir d = kv.second;
+        assert(owner[p] == myID);
+        assert(d >= 0 && d <= 4);
+        hlt_moves.insert({unpack_loc(p), (unsigned char)d});
+    }
+    sendFrame(hlt_moves);
+}
+
+
 int main() {
     std::cout.sync_with_stdio(0);
 
     hlt::GameMap presentMap;
-    getInit(::myID, presentMap);
+    unsigned char myID;
+    getInit(myID, presentMap);
+    ::myID = myID;
     init_globals(presentMap);
     sendInit("asdf.");
 
@@ -95,19 +112,15 @@ int main() {
         dbg << "-------------" << endl;
         getFrame(presentMap);
         init_globals(presentMap);
-        std::set<hlt::Move> moves;
 
-        for(unsigned short a = 0; a < presentMap.height; a++) {
-            for(unsigned short b = 0; b < presentMap.width; b++) {
-                if (presentMap.getSite({ b, a }).owner == myID) {
-                    moves.insert({
-                        { b, a },
-                        (unsigned char) random_move(engine) });
-                }
+        map<Loc, Dir> moves;
+        for (Loc p = 0; p < width * height; p++) {
+            if (owner[p] == myID) {
+                moves[p] = random_move(engine);
             }
         }
 
-        sendFrame(moves);
+        send_moves(moves);
     }
 
     return 0;

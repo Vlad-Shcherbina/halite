@@ -129,6 +129,82 @@ void precompute() {
 }
 
 
+map<Loc, Dir> generate_attack_moves() {
+    map<Loc, Dir> moves;
+
+    set<Loc> candidates;
+    for (Loc p = 0; p < area; p++) {
+        if (distance_to_border[p])
+            continue;
+        for (Loc n : neighbors(p)) {
+            if (owner[n] != myID)
+                candidates.insert(n);
+        }
+    }
+
+    while (true) {
+        map<Loc, Dir> best_moves;
+        float best_score = -1;
+
+        for (Loc c : candidates) {
+            int threat = strength[c];
+
+            for (Dir d : CARDINALS) {
+                Loc from = neighbors(c)[opposite(d) - 1];
+                if (owner[from] != myID || strength[from] == 0)
+                    continue;
+                if (moves.count(from))
+                    continue;
+                if (strength[from] > threat) {
+                    float score = production[c] / (threat + 1);
+                    if (score > best_score) {
+                        best_score = score;
+                        best_moves = {{from, d}};
+                    }
+                }
+            }
+        }
+
+        if (best_score < 0) {
+            break;
+        }
+
+        for (auto kv : best_moves) {
+            Loc to = neighbors(kv.first)[kv.second - 1];
+            candidates.erase(to);
+        }
+        moves.insert(begin(best_moves), end(best_moves));
+    }
+
+    return moves;
+}
+
+
+map<Loc, Dir> generate_reinforcement_moves() {
+    map<Loc, Dir> moves;
+    for (Loc p = 0; p < area; p++) {
+        if (owner[p] != myID || distance_to_border[p] == 0)
+            continue;
+        if (strength[p] < 6 * production[p])
+            continue;
+        float best_score = -1e10;
+        Dir best_dir = 0;
+        for (Dir d : CARDINALS) {
+            Loc to = neighbors(p)[d - 1];
+            if (distance_to_border[to] >= distance_to_border[p])
+                continue;
+            float score = 1000 - abs(strength[to] - 128);
+            if (score > best_score) {
+                best_score = score;
+                best_dir = d;
+            }
+        }
+        moves[p] = best_dir;
+    }
+    return moves;
+}
+
+
 int main() {
     std::cout.sync_with_stdio(0);
 
@@ -138,7 +214,7 @@ int main() {
     ::myID = myID;
     init_globals(presentMap);
     precompute();
-    sendInit("asdf.");
+    sendInit("asdf,");
 
     mt19937 engine;
     discrete_distribution<int> random_move {8, 2, 1, 0, 0};
@@ -149,14 +225,11 @@ int main() {
         init_globals(presentMap);
         precompute();
 
-        show(distance_to_border);
-
-        map<Loc, Dir> moves;
-        for (Loc p = 0; p < width * height; p++) {
-            if (owner[p] == myID) {
-                moves[p] = random_move(engine);
-            }
-        }
+        map<Loc, Dir> moves = generate_attack_moves();
+        debug(moves);
+        auto re = generate_reinforcement_moves();
+        debug(re);
+        moves.insert(begin(re), end(re));
 
         send_moves(moves);
     }

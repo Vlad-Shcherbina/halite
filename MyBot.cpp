@@ -8,6 +8,7 @@
 #include <array>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <random>
 #include <assert.h>
 
@@ -95,6 +96,39 @@ void send_moves(map<Loc, Dir> moves) {
 }
 
 
+void show(const vector<int> &board) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++)
+            dbg << setw(2) << board[pack(x, y)] << " ";
+        dbg << endl;
+    }
+}
+
+
+vector<int> distance_to_border;
+
+void precompute() {
+    distance_to_border = vector<int>(area, 10000);
+    for (Loc p = 0; p < area; p++) {
+        if (owner[p] != myID)
+            continue;
+        bool internal = true;
+        for (Loc n : neighbors(p))
+            if (owner[n] != myID)
+                internal = false;
+        if (!internal) {
+            distance_to_border[p] = 0;
+        }
+    }
+    for (int i = 0; i < width + height; i++)
+        for (Loc p = 0; p < area; p++)
+            for (Loc n : neighbors(p))
+                distance_to_border[p] = min(
+                    distance_to_border[p],
+                    distance_to_border[n] + 1);
+}
+
+
 int main() {
     std::cout.sync_with_stdio(0);
 
@@ -103,6 +137,7 @@ int main() {
     getInit(myID, presentMap);
     ::myID = myID;
     init_globals(presentMap);
+    precompute();
     sendInit("asdf.");
 
     mt19937 engine;
@@ -112,6 +147,9 @@ int main() {
         dbg << "-------------" << endl;
         getFrame(presentMap);
         init_globals(presentMap);
+        precompute();
+
+        show(distance_to_border);
 
         map<Loc, Dir> moves;
         for (Loc p = 0; p < width * height; p++) {

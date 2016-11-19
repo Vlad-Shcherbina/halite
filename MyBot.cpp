@@ -149,17 +149,32 @@ map<Loc, Dir> generate_attack_moves() {
         for (Loc c : candidates) {
             int threat = strength[c];
 
-            for (Dir d : CARDINALS) {
-                Loc from = neighbors(c)[opposite(d) - 1];
-                if (owner[from] != myID || strength[from] == 0)
+            vector<vector<Dir>> dss = {
+                {1}, {2}, {3}, {4},
+                {1, 2}, {2, 3}, {3, 4}, {4, 1}};
+
+            for (auto ds : dss) {
+                int attack = 0;
+                int prod_loss = 0;
+                map<Loc, Dir> mv;
+                bool valid = true;
+                for (Dir d : ds) {
+                    Loc from = neighbors(c)[opposite(d) - 1];
+                    if (owner[from] != myID || strength[from] == 0)
+                        valid = false;
+                    if (moves.count(from))
+                        valid = false;
+                    mv[from] = d;
+                    attack += strength[from];
+                    prod_loss += production[from];
+                }
+                if (!valid)
                     continue;
-                if (moves.count(from))
-                    continue;
-                if (strength[from] > threat) {
-                    float score = production[c] / (threat + 1);
+                if (attack > threat) {
+                    float score = production[c] / (threat + prod_loss + 1);
                     if (score > best_score) {
                         best_score = score;
-                        best_moves = {{from, d}};
+                        best_moves = mv;
                     }
                 }
             }

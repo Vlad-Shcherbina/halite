@@ -165,7 +165,7 @@ struct Opener {
 
     State solve() {
         vector<State> beam{initial};
-        for (int step = 0; step < 20; step++) {
+        for (int step = 0; step < 10; step++) {
             vector<State> next_beam;
             for (const State &s : beam) {
                 for (const State &s2 : s.successors()) {
@@ -177,7 +177,7 @@ struct Opener {
                  [](const State &s1, const State &s2) {
                      return s1.score > s2.score;
                  });
-            const int MAX_BEAM_WIDTH = 5;
+            const int MAX_BEAM_WIDTH = 4;
             if (next_beam.size() > MAX_BEAM_WIDTH)
                 next_beam.resize(MAX_BEAM_WIDTH);
             beam = next_beam;
@@ -212,7 +212,7 @@ int main() {
         std::set<hlt::Move> moves;
 
         Opener opener {presentMap};
-        if (opener.initial.own.size() < 35) {
+        if (opener.initial.own.size() < 30) {
             debug(opener.initial);
             auto s = opener.solve();
             debug(s.moves);

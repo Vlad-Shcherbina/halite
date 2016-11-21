@@ -6,6 +6,8 @@
 #include <set>
 #include <map>
 #include <array>
+#include <algorithm>
+#include <iterator>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -26,6 +28,7 @@ ofstream dbg("zzz.log");
          << ", " #y " = " << (y) \
          << ", " #z " = " << (z) << std::endl
 
+bool experiment = false;
 
 int myID;
 int width;
@@ -137,71 +140,166 @@ void precompute() {
 }
 
 
-map<Loc, Dir> generate_attack_moves() {
-    map<Loc, Dir> moves;
+struct Plan {
+    Loc target;
+    vector<map<Loc, Dir>> moves;  // grouped by turns
 
-    set<Loc> candidates;
-    for (Loc p = 0; p < area; p++) {
-        if (distance_to_border[p])
-            continue;
-        for (Loc n : neighbors(p)) {
-            if (owner[n] != myID)
-                candidates.insert(n);
-        }
-    }
+    vector<Loc> footprint;
+    int initial_strength = 0;
+    int prod = 0;
+    int waste = 0;
+    int wait_time;
 
-    while (true) {
-        map<Loc, Dir> best_moves;
-        float best_score = -1;
+    Plan(Loc target, vector<map<Loc, Dir>> moves)
+        : target(target),
+          moves(moves),
+          footprint {target} {
+        int turn = 0;
+        for (const auto ms : moves) {
+            for (auto kv : ms) {
+                Loc from = kv.first;
+                footprint.push_back(from);
+                initial_strength += strength[from] + turn * production[from];
+                prod += production[from];
 
-        for (Loc c : candidates) {
-            int threat = strength[c];
-
-            vector<vector<Dir>> dss = {
-                {1}, {2}, {3}, {4},
-                {1, 2}, {2, 3}, {3, 4}, {4, 1}};
-
-            for (auto ds : dss) {
-                int attack = 0;
-                int prod_loss = 0;
-                map<Loc, Dir> mv;
-                bool valid = true;
-                for (Dir d : ds) {
-                    Loc from = move_src(c, d);
-                    if (owner[from] != myID || strength[from] == 0)
-                        valid = false;
-                    if (moves.count(from))
-                        valid = false;
-                    mv[from] = d;
-                    attack += strength[from];
-                    prod_loss += production[from];
-                }
-                if (!valid)
-                    continue;
-                if (attack > threat) {
-                    float score = production[c] / (threat + prod_loss + 1);
-                    if (score > best_score) {
-                        best_score = score;
-                        best_moves = mv;
-                    }
+                if (distance_to_border[from] <=
+                    distance_to_border[move_dst(from, kv.second)]) {
+                    waste += production[from];
                 }
             }
+            turn++;
         }
-
-        if (best_score < 0) {
-            break;
-        }
-
-        for (auto kv : best_moves)
-            candidates.erase(move_dst(kv.first, kv.second));
-        moves.insert(begin(best_moves), end(best_moves));
+        sort(begin(footprint), end(footprint));
+        wait_time = compute_wait_time();
     }
 
+    int compute_wait_time() const {
+        if (initial_strength > strength[target])
+            return 0;
+        if (prod == 0)
+            return 1000;
+        int t = 0;
+        int s = initial_strength;
+        while (s <= strength[target]) {
+            s += prod;
+            t++;
+        }
+        return t;
+    }
+
+    double score() const {
+        // TODO: prefer moves toward the border
+        return 1.0 * production[target] /
+            (strength[target] + waste + wait_time * production[target] + 1e-6);
+    }
+};
+
+// http://stackoverflow.com/a/17050528/6335232
+template<typename T>
+vector<vector<T>> cartesian_product(const vector<vector<T>>& v) {
+    vector<vector<T>> s = {{}};
+    for (auto& u : v) {
+        vector<vector<T>> r;
+        for (const auto& x : s) {
+            for (auto y : u) {
+                r.push_back(x);
+                r.back().push_back(y);
+            }
+        }
+        s = move(r);
+    }
+    return s;
+}
+
+
+vector<map<Loc, Dir>> generate_approaches(const set<Loc> &targets) {
+    set<Loc> froms;
+    for (Loc t : targets)
+        for (Loc n : neighbors(t))
+            if (owner[n] == myID)
+                froms.insert(n);
+    vector<vector<pair<Loc, Dir>>> choices;
+    for (Loc from : froms) {
+        choices.push_back({{-1, -1}});
+        for (Dir d : CARDINALS)
+            if (targets.count(move_dst(from, d)))
+                choices.back().emplace_back(from, d);
+    }
+    vector<map<Loc, Dir>> result;
+    for (const auto &comb : cartesian_product(choices)) {
+        result.emplace_back(begin(comb), end(comb));
+        result.back().erase(-1);
+        if (result.back().empty())
+            result.pop_back();
+    }
+    return result;
+}
+
+
+template<typename BACK_INSERTER>
+void generate_capture_plans(Loc target, BACK_INSERTER emit) {
+    assert(owner[target] != myID);
+    for (const auto &app : generate_approaches({target})) {
+        *emit++ = Plan {target, {app}};
+
+        // Advanced planning against the enemy is pointless.
+        // Skip for performance.
+        if (owner[target] != 0)
+            continue;
+
+        set<Loc> layer2;
+        for (auto kv : app)
+            layer2.insert(kv.first);
+        for (const auto &app2 : generate_approaches(layer2))
+            *emit++ = Plan {target, {app2, app}};
+    }
+}
+
+
+map<Loc, Dir> generate_capture_moves() {
+    vector<Plan> plans;
+
+    for (Loc target = 0; target < area; target++)
+        if (owner[target] != myID)
+            generate_capture_plans(target, back_inserter(plans));
+
+    debug(plans.size());
+
+    map<Loc, Dir> moves;
+
+    while (!plans.empty()) {
+        debug(plans.size());
+        auto best = max_element(
+            begin(plans), end(plans),
+            [](const Plan &p1, const Plan &p2) {
+                return p1.score() < p2.score();
+            });
+        if (best->wait_time == 0)
+            moves.insert(begin(best->moves.front()), end(best->moves.front()));
+
+        debug3(best->moves, best->wait_time, best->score());
+
+        auto f = best->footprint;
+        plans.erase(
+            remove_if(
+                begin(plans), end(plans),
+                [&f](const Plan &p) {
+                    vector<Loc> overlap;
+                    set_intersection(
+                        begin(f), end(f),
+                        begin(p.footprint), end(p.footprint),
+                        back_inserter(overlap));
+                    return !overlap.empty();
+                }),
+            end(plans));
+    }
     return moves;
 }
 
 
 map<Loc, Dir> generate_reinforcement_moves() {
+    // TODO: avoid interference with capture plans
+    // (currently we just overwrite reinforcement moves with captures)
     map<Loc, Dir> moves;
     for (Loc p = 0; p < area; p++) {
         if (owner[p] != myID || distance_to_border[p] == 0)
@@ -226,7 +324,10 @@ map<Loc, Dir> generate_reinforcement_moves() {
 }
 
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc > 1 && argv[1] == string("experiment"))
+        ::experiment = true;
+
     std::cout.sync_with_stdio(0);
 
     hlt::GameMap presentMap;
@@ -235,7 +336,7 @@ int main() {
     ::myID = myID;
     init_globals(presentMap);
     precompute();
-    sendInit("asdf,");
+    sendInit(experiment ? "exp" : "asdf,");
 
     mt19937 engine;
     discrete_distribution<int> random_move {8, 2, 1, 0, 0};
@@ -246,11 +347,11 @@ int main() {
         init_globals(presentMap);
         precompute();
 
-        map<Loc, Dir> moves = generate_attack_moves();
+        map<Loc, Dir> moves = generate_reinforcement_moves();
         debug(moves);
-        auto re = generate_reinforcement_moves();
-        debug(re);
-        moves.insert(begin(re), end(re));
+        auto cap = generate_capture_moves();
+        debug(cap);
+        moves.insert(begin(cap), end(cap));
 
         send_moves(moves);
     }

@@ -139,7 +139,8 @@ void send_moves(map<Loc, Dir> moves) {
         Loc p = kv.first;
         Dir d = kv.second;
         assert(owner[p] == myID);
-        hlt_moves.insert({p.as_hlt_loc(), (unsigned char)d});
+        if (d != Dir::still)
+            hlt_moves.insert({p.as_hlt_loc(), (unsigned char)d});
     }
     sendFrame(hlt_moves);
 }
@@ -223,6 +224,22 @@ struct Plan {
             t++;
         }
         return t;
+    }
+
+    map<Loc, Dir> initial_moves() const {
+        map<Loc, Dir> result;
+        int turn = wait_time;
+        for (const auto &ms : moves) {
+            for (auto kv : ms) {
+                assert(result.count(kv.first) == 0);
+                if (turn == 0)
+                    result.insert(kv);
+                else
+                    result.insert({kv.first, Dir::still});
+            }
+            turn++;
+        }
+        return result;
     }
 
     double score() const {
@@ -312,8 +329,10 @@ map<Loc, Dir> generate_capture_moves() {
             [](const Plan &p1, const Plan &p2) {
                 return p1.score() < p2.score();
             });
-        if (best->wait_time == 0)
-            moves.insert(begin(best->moves.front()), end(best->moves.front()));
+        for (auto kv : best->initial_moves()) {
+            assert(moves.count(kv.first) == 0);
+            moves.insert(kv);
+        }
 
         debug3(best->moves, best->wait_time, best->score());
 

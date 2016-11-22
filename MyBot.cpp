@@ -38,8 +38,28 @@ vector<int> production;
 vector<int> owner;
 vector<int> strength;
 
+enum class Dir {
+    still = 0,
+    north = 1,
+    east = 2,
+    south = 3,
+    west = 4,
+};
+
+ostream& operator<<(ostream &out, Dir d) {
+    switch(d) {
+    case Dir::still: out << "x"; break;
+    case Dir::north: out << "N"; break;
+    case Dir::east: out << "E"; break;
+    case Dir::south: out << "S"; break;
+    case Dir::west: out << "W"; break;
+    }
+    return out;
+}
+
+const Dir all_moves[] = { Dir::north, Dir::east, Dir::south, Dir::west };
+
 using Loc = int;
-using Dir = int;
 
 Loc pack(int x, int y) {
     return x + width * y;
@@ -65,14 +85,14 @@ array<Loc, 4> neighbors(Loc p) {
 }
 
 Dir opposite(Dir dir) {
-    assert(dir >= 1 && dir <= 4);
-    return ((dir - 1) ^ 2) + 1;
+    assert(dir != Dir::still);
+    return (Dir)((((int)dir - 1) ^ 2) + 1);
 }
 
 // TODO: more efficient
 Loc move_dst(Loc src, Dir d) {
-    assert(d >= 1 && d <= 4);
-    return neighbors(src)[d - 1];
+    assert(d != Dir::still);
+    return neighbors(src)[(int)d - 1];
 }
 Loc move_src(Loc dst, Dir d) {
     return move_dst(dst, opposite(d));
@@ -100,7 +120,6 @@ void send_moves(map<Loc, Dir> moves) {
         Loc p = kv.first;
         Dir d = kv.second;
         assert(owner[p] == myID);
-        assert(d >= 0 && d <= 4);
         hlt_moves.insert({unpack_loc(p), (unsigned char)d});
     }
     sendFrame(hlt_moves);
@@ -220,8 +239,8 @@ vector<map<Loc, Dir>> generate_approaches(const set<Loc> &targets) {
                 froms.insert(n);
     vector<vector<pair<Loc, Dir>>> choices;
     for (Loc from : froms) {
-        choices.push_back({{-1, -1}});
-        for (Dir d : CARDINALS)
+        choices.push_back({{-1, Dir::still}});
+        for (Dir d : all_moves)
             if (targets.count(move_dst(from, d)))
                 choices.back().emplace_back(from, d);
     }
@@ -307,8 +326,8 @@ map<Loc, Dir> generate_reinforcement_moves() {
         if (strength[p] < 6 * production[p])
             continue;
         float best_score = -1e10;
-        Dir best_dir = 0;
-        for (Dir d : CARDINALS) {
+        Dir best_dir = Dir::still;
+        for (Dir d : all_moves) {
             Loc to = move_dst(p, d);
             if (distance_to_border[to] >= distance_to_border[p])
                 continue;

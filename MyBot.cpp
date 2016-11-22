@@ -59,28 +59,47 @@ ostream& operator<<(ostream &out, Dir d) {
 
 const Dir all_moves[] = { Dir::north, Dir::east, Dir::south, Dir::west };
 
-using Loc = int;
+class Loc {
+public:
+    Loc() = default;
+    Loc(int value): value(value) {}
+    operator int() const {
+        return value;
+    }
+    Loc operator++(int postfix) {
+        (void)postfix;  // unused
+        return value++;
+    }
+    static Loc pack(int x, int y) {
+        return x + width * y;
+    }
+    hlt::Location as_hlt_loc() const {
+        assert(value >= 0);
+        assert(value < area);
+        hlt::Location res;
+        res.x = value % width;
+        res.y = value / width;
+        return res;
+    }
+private:
+    int value;
+};
 
-Loc pack(int x, int y) {
-    return x + width * y;
-}
-hlt::Location unpack_loc(Loc p) {
-    assert(p >= 0);
-    assert(p < area);
-    hlt::Location res;
-    res.x = p % width;
-    res.y = p / width;
-    return res;
+
+ostream& operator<<(ostream &out, Loc loc) {
+    auto hlt_loc = loc.as_hlt_loc();
+    out << "<" << hlt_loc.x << "," << hlt_loc.y << ">";
+    return out;
 }
 
 array<Loc, 4> neighbors(Loc p) {
     int x = p % width;
     int y = p / width;
     array<Loc, 4> result;
-    result[0] = pack(x, y == 0 ? height - 1 : y - 1);
-    result[1] = pack(x == width - 1 ? 0 : x + 1, y);
-    result[2] = pack(x, y == height - 1 ? 0 : y + 1);
-    result[3] = pack(x == 0 ? width - 1 : x - 1, y);
+    result[0] = Loc::pack(x, y == 0 ? height - 1 : y - 1);
+    result[1] = Loc::pack(x == width - 1 ? 0 : x + 1, y);
+    result[2] = Loc::pack(x, y == height - 1 ? 0 : y + 1);
+    result[3] = Loc::pack(x == 0 ? width - 1 : x - 1, y);
     return result;
 }
 
@@ -106,7 +125,7 @@ void init_globals(hlt::GameMap &game_map) {
     ::production.resize(area);
     ::owner.resize(area);
     for (Loc p = 0; p < area; p++) {
-        auto &site = game_map.getSite(unpack_loc(p));
+        auto &site = game_map.getSite(p.as_hlt_loc());
         ::strength[p] = site.strength;
         ::production[p] = site.production;
         ::owner[p] = site.owner;
@@ -120,7 +139,7 @@ void send_moves(map<Loc, Dir> moves) {
         Loc p = kv.first;
         Dir d = kv.second;
         assert(owner[p] == myID);
-        hlt_moves.insert({unpack_loc(p), (unsigned char)d});
+        hlt_moves.insert({p.as_hlt_loc(), (unsigned char)d});
     }
     sendFrame(hlt_moves);
 }
@@ -129,7 +148,7 @@ void send_moves(map<Loc, Dir> moves) {
 void show(const vector<int> &board) {
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++)
-            dbg << setw(2) << board[pack(x, y)] << " ";
+            dbg << setw(2) << board[Loc::pack(x, y)] << " ";
         dbg << endl;
     }
 }

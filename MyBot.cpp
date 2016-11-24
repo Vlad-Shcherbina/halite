@@ -213,7 +213,8 @@ struct Plan {
     }
 
     int compute_wait_time() const {
-        if (initial_strength > strength[target])
+        if (initial_strength > strength[target] ||
+            initial_strength == 255)
             return 0;
         if (prod == 0)
             return 1000;

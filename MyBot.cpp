@@ -382,7 +382,168 @@ map<Loc, Dir> generate_reinforcement_moves() {
 }
 
 
+struct DiamondOutcome {
+    int strength = -1;
+    int owner = -1;
+};
+
+template<typename F>
+DiamondOutcome simulate_diamond(Loc p, const F &get_move) {
+    const int MAX_ID = 7;
+    assert(owner[p] < MAX_ID);
+
+    DiamondOutcome result;
+
+    int arrive[MAX_ID] = {0};
+    bool attack[MAX_ID] = {false};
+    int damage[MAX_ID] = {0};
+
+    attack[owner[p]] = true;
+    damage[owner[p]] += strength[p];
+    if (get_move(p) == Dir::still) {
+        arrive[owner[p]] += strength[p];
+        if (owner[p])
+            arrive[owner[p]] += production[p];
+    } else {
+        arrive[owner[p]] = 0;
+    }
+
+    for (Dir d : all_moves) {
+        Loc q = move_src(p, d);
+        Dir move = get_move(q);
+        if (move == d)
+            arrive[owner[q]] += strength[q];
+        if (move == d || (move == Dir::still && owner[q] && owner[p])) {
+            attack[owner[q]] = true;
+            damage[owner[q]] += strength[q];
+        }
+    }
+
+    for (int i = 0; i < MAX_ID; i++)
+        for (int j = 0; j < MAX_ID; j++)
+            if (i != j)
+                arrive[i] = max(arrive[i] - damage[j], 0);
+
+    int cnt = 0;
+    for (int i = 0; i < MAX_ID; i++) {
+        if (arrive[i]) {
+            cnt++;
+            result.owner = i;
+            result.strength = arrive[i];
+        }
+    }
+    assert(cnt <= 1);
+
+    if (cnt == 0) {
+        result.owner = owner[p];
+        result.strength = 0;
+    }
+
+    return result;
+}
+
+
+vector<int> input_board() {
+    vector<int> result(area);
+    for (int &x : result)
+        cin >> x;
+    return result;
+}
+
+int test_simulate_diamond() {
+    int errors = 0;
+    int i = 0;
+    while (cin >> ::width) {
+        cin >> ::height;
+        ::area = width * height;
+        cout << "test#" << i << ": " << ::width << " x " << ::height << endl;
+
+        string s;
+        cin >> s;
+        assert(s == "production");
+        ::production = input_board();
+
+        cin >> s;
+        assert(s == "owner");
+        ::owner = input_board();
+
+        cin >> s;
+        assert(s == "strength");
+        ::strength = input_board();
+
+        cin >> s;
+        assert(s == "moves");
+        auto moves = input_board();
+        /*map<Loc, Dir> moves_map;
+        for (Loc p = 0; p < area; p++)
+            if (moves[p])
+            moves_map[p] = (Dir)moves[p];*/
+
+        cin >> s;
+        assert(s == "next_owner");
+        auto next_owner = input_board();
+
+        cin >> s;
+        assert(s == "next_strength");
+        auto next_strength = input_board();
+
+        auto get_move = [&moves](Loc p) { return (Dir)moves[p]; };
+        for (Loc p = 0; p < area; p++) {
+            auto res = simulate_diamond(p, get_move);
+            if (res.owner != next_owner[p] || res.strength != next_strength[p]) {
+                auto rel = [p](int dx, int dy) {
+                    auto hlt_loc = p.as_hlt_loc();
+                    return Loc::pack(
+                        (hlt_loc.x + dx + width) % width,
+                        (hlt_loc.y + dy + height) % height);
+                };
+                cout << p << endl;
+                cout << "production       owner       strength            moves"
+                     << endl;
+                for (int i = -2; i <= 2; i++) {
+                    for (int j = -2; j <= 2; j++)
+                        cout << setw(2) << production[rel(j, i)] << " ";
+                    cout << "  ";
+                    for (int j = -2; j <= 2; j++)
+                        cout << owner[rel(j, i)] << " ";
+                    cout << "  ";
+                    for (int j = -2; j <= 2; j++)
+                        cout << setw(3) << strength[rel(j, i)] << " ";
+                    cout << "  ";
+                    for (int j = -2; j <= 2; j++)
+                        cout << (Dir)moves[rel(j, i)] << " ";
+                    cout << endl;
+                }
+                cout << "Expected: "
+                     << next_owner[p] << ", "
+                     << next_strength[p] << endl;
+                cout << "Got:      "
+                     << res.owner << ", "
+                     << res.strength << endl;
+                cout << endl;
+                errors++;
+                terminate();
+            }
+        }
+
+        i++;
+    }
+
+    if (errors) {
+        cout << errors << " errors" << endl;
+        return 1;
+    } else {
+        cout << "ok" << endl;
+        return 0;
+    }
+}
+
+
 int main(int argc, char *argv[]) {
+    if (argc > 1 && argv[1] == string("test")) {
+        return test_simulate_diamond();
+    }
+
     if (argc > 1 && argv[1] == string("experiment"))
         ::experiment = true;
 

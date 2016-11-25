@@ -273,11 +273,13 @@ vector<vector<T>> cartesian_product(const vector<vector<T>>& v) {
 }
 
 
-vector<map<Loc, Dir>> generate_approaches(const set<Loc> &targets) {
+vector<map<Loc, Dir>> generate_approaches(
+    const set<Loc> &targets, const set<Loc> &forbidden) {
+
     set<Loc> froms;
     for (Loc t : targets)
         for (Loc n : neighbors(t))
-            if (owner[n] == myID)
+            if (owner[n] == myID && forbidden.count(n) == 0)
                 froms.insert(n);
     vector<vector<pair<Loc, Dir>>> choices;
     for (Loc from : froms) {
@@ -298,9 +300,11 @@ vector<map<Loc, Dir>> generate_approaches(const set<Loc> &targets) {
 
 
 template<typename BACK_INSERTER>
-void generate_capture_plans(Loc target, BACK_INSERTER emit) {
+void generate_capture_plans(
+    Loc target, const set<Loc> &forbidden, BACK_INSERTER emit) {
+    
     assert(owner[target] != myID);
-    for (const auto &app : generate_approaches({target})) {
+    for (const auto &app : generate_approaches({target}, forbidden)) {
         *emit++ = Plan {target, {app}};
 
         // Advanced planning against the enemy is pointless.
@@ -311,18 +315,18 @@ void generate_capture_plans(Loc target, BACK_INSERTER emit) {
         set<Loc> layer2;
         for (auto kv : app)
             layer2.insert(kv.first);
-        for (const auto &app2 : generate_approaches(layer2))
+        for (const auto &app2 : generate_approaches(layer2, forbidden))
             *emit++ = Plan {target, {app2, app}};
     }
 }
 
 
-map<Loc, Dir> generate_capture_moves() {
+map<Loc, Dir> generate_capture_moves(const set<Loc> &forbidden) {
     vector<Plan> plans;
 
     for (Loc target = 0; target < area; target++)
         if (owner[target] != myID)
-            generate_capture_plans(target, back_inserter(plans));
+            generate_capture_plans(target, forbidden, back_inserter(plans));
 
     debug(plans.size());
 
@@ -579,6 +583,38 @@ int test_simulate_diamond() {
 }
 
 
+vector<Loc> enumerate_neighborhood(Loc p, int radius) {
+    vector<Loc> result;
+    assert(radius >= 0);
+    int x = p.as_hlt_loc().x;
+    int y = p.as_hlt_loc().y;
+    for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -radius + abs(dy); dx <= radius - abs(dy); dx++) {
+            result.push_back(Loc::pack((x + dx + width) % width,
+                                       (y + dy + height) % height));
+        }
+    }
+    return result;
+}
+
+
+vector<Loc> combat_pieces() {
+    vector<Loc> result;
+    for (Loc p = 0; p < area; p++) {
+        if (owner[p] != myID)
+            continue;
+        bool combat = false;
+        for (Loc n : enumerate_neighborhood(p, 2)) {
+            if (owner[n] && owner[n] != owner[p])
+                combat = true;
+        }
+        if (combat)
+            result.push_back(p);
+    }
+    return result;
+}
+
+
 int main(int argc, char *argv[]) {
     if (argc > 1 && argv[1] == string("test")) {
         return test_simulate_diamond();
@@ -600,15 +636,17 @@ int main(int argc, char *argv[]) {
     mt19937 engine;
     discrete_distribution<int> random_move {8, 2, 1, 0, 0};
 
-    while(true) {
+    while (true) {
         dbg << "-------------" << endl;
         getFrame(presentMap);
         init_globals(presentMap);
         precompute();
 
+        auto cs = combat_pieces();
+
         map<Loc, Dir> moves = generate_reinforcement_moves();
         debug(moves);
-        auto cap = generate_capture_moves();
+        auto cap = generate_capture_moves({begin(cs), end(cs)});
         debug(cap);
         moves.insert(begin(cap), end(cap));
 

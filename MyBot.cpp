@@ -59,6 +59,16 @@ ostream& operator<<(ostream &out, Dir d) {
 
 const Dir all_moves[] = { Dir::north, Dir::east, Dir::south, Dir::west };
 
+Dir opposite(Dir dir) {
+    assert(dir != Dir::still);
+    return (Dir)((((int)dir - 1) ^ 2) + 1);
+}
+
+Dir turn_cw(Dir d) {
+    assert(d != Dir::still);
+    return (Dir)((int)d % 4 + 1);
+}
+
 class Loc {
 public:
     Loc() = default;
@@ -101,11 +111,6 @@ array<Loc, 4> neighbors(Loc p) {
     result[2] = Loc::pack(x, y == height - 1 ? 0 : y + 1);
     result[3] = Loc::pack(x == 0 ? width - 1 : x - 1, y);
     return result;
-}
-
-Dir opposite(Dir dir) {
-    assert(dir != Dir::still);
-    return (Dir)((((int)dir - 1) ^ 2) + 1);
 }
 
 // TODO: more efficient
@@ -396,16 +401,16 @@ DiamondOutcome simulate_diamond(Loc p, const F &get_move) {
 
     int arrive[MAX_ID] = {0};
     bool attack[MAX_ID] = {false};
-    int damage[MAX_ID] = {0};
+    int damage[MAX_ID] = {0};  // from neighbors
 
     attack[owner[p]] = true;
-    damage[owner[p]] += strength[p];
     if (get_move(p) == Dir::still) {
         arrive[owner[p]] += strength[p];
         if (owner[p])
             arrive[owner[p]] += production[p];
     } else {
         arrive[owner[p]] = 0;
+        damage[owner[p]] += strength[p];
     }
 
     for (Dir d : all_moves) {
@@ -413,30 +418,69 @@ DiamondOutcome simulate_diamond(Loc p, const F &get_move) {
         Dir move = get_move(q);
         if (move == d)
             arrive[owner[q]] += strength[q];
-        if (move == d || (move == Dir::still && owner[q] && owner[p])) {
+        if ((move == d || move == Dir::still) && owner[q]) {
             attack[owner[q]] = true;
-            damage[owner[q]] += strength[q];
+            if (move == Dir::still)
+                damage[owner[q]] += strength[q] + production[q];
+        }
+
+        Dir d2 = turn_cw(d);
+        Loc q2 = move_src(q, d2);
+        move = get_move(q2);
+        if (owner[q2] && (move == d || move == d2)) {
+            attack[owner[q2]] = true;
+            damage[owner[q2]] += strength[q2];
+        }
+
+        q2 = move_src(q, d);
+        move = get_move(q2);
+        if (owner[q2] && move == d) {
+            attack[owner[q2]] = true;
+            damage[owner[q2]] += strength[q2];
         }
     }
+    assert(damage[0] == 0);
 
+    // cout << vector<int>(arrive, arrive + MAX_ID) << endl;
+    // cout << vector<int>(damage, damage + MAX_ID) << endl;
+
+    int survive[MAX_ID];
     for (int i = 0; i < MAX_ID; i++)
-        for (int j = 0; j < MAX_ID; j++)
-            if (i != j)
-                arrive[i] = max(arrive[i] - damage[j], 0);
+        survive[i] = min(arrive[i], 255);
+
+    for (int i = 0; i < MAX_ID; i++) {
+        if (survive[i] <= 0)
+            continue;
+        for (int j = 0; j < MAX_ID; j++) {
+            if (i != j) {
+                survive[i] -= arrive[j];
+                if (i)
+                    survive[i] -= damage[j];
+            }
+        }
+    }
 
     int cnt = 0;
     for (int i = 0; i < MAX_ID; i++) {
-        if (arrive[i]) {
+        if (survive[i] > 0) {
             cnt++;
             result.owner = i;
-            result.strength = arrive[i];
+            result.strength = survive[i];
         }
     }
+    // cout << vector<int>(survive, survive + MAX_ID) << endl;
+    // cout << endl;
     assert(cnt <= 1);
 
     if (cnt == 0) {
-        result.owner = owner[p];
         result.strength = 0;
+        result.owner = owner[p];
+        for (int i = 1; i < MAX_ID; i++) {
+            if (attack[i] && i != owner[p]) {
+                result.owner = 0;
+                break;
+            }
+        }
     }
 
     return result;
@@ -474,10 +518,6 @@ int test_simulate_diamond() {
         cin >> s;
         assert(s == "moves");
         auto moves = input_board();
-        /*map<Loc, Dir> moves_map;
-        for (Loc p = 0; p < area; p++)
-            if (moves[p])
-            moves_map[p] = (Dir)moves[p];*/
 
         cin >> s;
         assert(s == "next_owner");

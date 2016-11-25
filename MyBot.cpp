@@ -394,6 +394,15 @@ map<Loc, Dir> generate_reinforcement_moves() {
 struct DiamondOutcome {
     int strength = -1;
     int owner = -1;
+    int evaluate(Loc p) const {
+        if (owner == 0)
+            return 0;
+        int res = strength + ::production[p];
+        if (owner == myID)
+            return res;
+        else
+            return -res;
+    }
 };
 
 template<typename F>
@@ -598,7 +607,7 @@ vector<Loc> enumerate_neighborhood(Loc p, int radius) {
 }
 
 
-vector<Loc> combat_pieces() {
+vector<Loc> list_combat_pieces() {
     vector<Loc> result;
     for (Loc p = 0; p < area; p++) {
         if (owner[p] != myID)
@@ -611,6 +620,45 @@ vector<Loc> combat_pieces() {
         if (combat)
             result.push_back(p);
     }
+    return result;
+}
+
+
+map<Loc, Dir> generate_combat_moves(
+    const vector<Loc> &combat_pieces, const map<Loc, Dir> &other_moves) {
+    vector<Dir> moves(area, Dir::still);
+    for (auto kv : other_moves)
+        moves[kv.first] = kv.second;
+    auto get_move = [&moves](Loc p) { return moves[p]; };
+
+    map<Loc, Dir> result;
+
+    for (int pass = 0; pass < 3; pass++) {
+        for (auto p : combat_pieces) {
+            auto ns = enumerate_neighborhood(p, 2);
+
+            moves[p] = Dir::still;
+            Dir best_move = Dir::still;
+            int best_score = 0;
+            for (Loc n : ns)
+                best_score += simulate_diamond(n, get_move).evaluate(n);
+
+            for (Dir d : all_moves) {
+                moves[p] = d;
+                int score = 0;
+                for (Loc n : ns)
+                    score += simulate_diamond(n, get_move).evaluate(n);
+                if (score > best_score) {
+                    debug2(score, best_score);
+                    best_score = score;
+                    best_move = d;
+                }
+            }
+            moves[p] = best_move;
+            result[p] = best_move;
+        }
+    }
+
     return result;
 }
 
@@ -642,13 +690,18 @@ int main(int argc, char *argv[]) {
         init_globals(presentMap);
         precompute();
 
-        auto cs = combat_pieces();
+        auto combat_pieces = list_combat_pieces();
 
         map<Loc, Dir> moves = generate_reinforcement_moves();
         debug(moves);
-        auto cap = generate_capture_moves({begin(cs), end(cs)});
+        auto cap = generate_capture_moves(
+            {begin(combat_pieces), end(combat_pieces)});
         debug(cap);
         moves.insert(begin(cap), end(cap));
+
+        auto combat_moves = generate_combat_moves(combat_pieces, moves);
+        debug(combat_moves);
+        moves.insert(begin(combat_moves), end(combat_moves));
 
         send_moves(moves);
     }

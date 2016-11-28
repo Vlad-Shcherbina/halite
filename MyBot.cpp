@@ -312,7 +312,7 @@ vector<map<Loc, Dir>> generate_approaches(
 template<typename BACK_INSERTER>
 void generate_capture_plans(
     Loc target, const set<Loc> &forbidden, BACK_INSERTER emit) {
-    
+
     assert(owner[target] != myID);
     for (const auto &app : generate_approaches({target}, forbidden)) {
         *emit++ = Plan {target, {app}};
@@ -338,12 +338,9 @@ map<Loc, Dir> generate_capture_moves(const set<Loc> &forbidden) {
         if (owner[target] != myID)
             generate_capture_plans(target, forbidden, back_inserter(plans));
 
-    debug(plans.size());
-
     map<Loc, Dir> moves;
 
     while (!plans.empty()) {
-        debug(plans.size());
         auto best = max_element(
             begin(plans), end(plans),
             [](const Plan &p1, const Plan &p2) {
@@ -353,8 +350,6 @@ map<Loc, Dir> generate_capture_moves(const set<Loc> &forbidden) {
             assert(moves.count(kv.first) == 0);
             moves.insert(kv);
         }
-
-        debug3(best->moves, best->wait_time, best->score());
 
         auto f = best->footprint;
         plans.erase(

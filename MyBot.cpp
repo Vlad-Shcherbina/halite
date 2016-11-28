@@ -313,14 +313,9 @@ template<typename BACK_INSERTER>
 void generate_capture_plans(
     Loc target, const set<Loc> &forbidden, BACK_INSERTER emit) {
 
-    assert(owner[target] != myID);
+    assert(owner[target] == 0);
     for (const auto &app : generate_approaches({target}, forbidden)) {
         *emit++ = Plan {target, {app}};
-
-        // Advanced planning against the enemy is pointless.
-        // Skip for performance.
-        if (owner[target] != 0)
-            continue;
 
         set<Loc> layer2;
         for (auto kv : app)
@@ -335,7 +330,7 @@ map<Loc, Dir> generate_capture_moves(const set<Loc> &forbidden) {
     vector<Plan> plans;
 
     for (Loc target = 0; target < area; target++)
-        if (owner[target] != myID)
+        if (owner[target] == 0)
             generate_capture_plans(target, forbidden, back_inserter(plans));
 
     map<Loc, Dir> moves;

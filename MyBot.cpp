@@ -608,6 +608,25 @@ vector<Loc> enumerate_neighborhood(Loc p, int radius) {
 }
 
 
+vector<Dir> moves_scratch;
+struct GetMoveScratch {
+    Dir operator()(Loc p) const { return moves_scratch[p]; }
+} get_move_scratch;
+
+
+class OpponentModel {
+public:
+    float evaluate_board(const map<Loc, Dir> &moves) const {
+        for (auto kv : moves)
+            moves_scratch[kv.first] = kv.second;
+        float result = 0.0;
+        for (int p = 0; p < area; p++)
+            result += simulate_diamond(p, get_move_scratch).evaluate(p);
+        return result;
+    }
+};
+
+
 vector<Loc> list_combat_pieces() {
     vector<Loc> result;
     for (Loc p = 0; p < area; p++) {
@@ -625,40 +644,42 @@ vector<Loc> list_combat_pieces() {
 }
 
 
-map<Loc, Dir> generate_combat_moves(
-    const vector<Loc> &combat_pieces, const map<Loc, Dir> &other_moves) {
-    vector<Dir> moves(area, Dir::still);
-    for (auto kv : other_moves)
-        moves[kv.first] = kv.second;
-    auto get_move = [&moves](Loc p) { return moves[p]; };
-
+map<Loc, Dir> generate_combat_moves(const vector<Loc> &combat_pieces) {
     map<Loc, Dir> result;
+    for (Loc p : combat_pieces)
+        result[p] = Dir::still;
+
+    auto base_score = OpponentModel().evaluate_board(result);
 
     for (int pass = 0; pass < 3; pass++) {
         for (auto p : combat_pieces) {
             auto ns = enumerate_neighborhood(p, 2);
 
-            moves[p] = Dir::still;
+            moves_scratch[p] = Dir::still;
             Dir best_move = Dir::still;
             int best_score = 0;
             for (Loc n : ns)
-                best_score += simulate_diamond(n, get_move).evaluate(n);
+                best_score += simulate_diamond(n, get_move_scratch).evaluate(n);
 
             for (Dir d : all_moves) {
-                moves[p] = d;
+                moves_scratch[p] = d;
                 int score = 0;
                 for (Loc n : ns)
-                    score += simulate_diamond(n, get_move).evaluate(n);
+                    score += simulate_diamond(n, get_move_scratch).evaluate(n);
                 if (score > best_score) {
                     debug2(score, best_score);
                     best_score = score;
                     best_move = d;
                 }
             }
-            moves[p] = best_move;
+            moves_scratch[p] = best_move;
             result[p] = best_move;
         }
     }
+
+    auto final_score = OpponentModel().evaluate_board(result);
+    debug2(base_score, final_score);
+    assert(final_score >= base_score);
 
     return result;
 }
@@ -700,7 +721,11 @@ int main(int argc, char *argv[]) {
         debug(cap);
         moves.insert(begin(cap), end(cap));
 
-        auto combat_moves = generate_combat_moves(combat_pieces, moves);
+        ::moves_scratch = vector<Dir>(area, Dir::still);
+        for (auto kv : moves)
+            moves_scratch[kv.first] = kv.second;
+
+        auto combat_moves = generate_combat_moves(combat_pieces);
         debug(combat_moves);
         moves.insert(begin(combat_moves), end(combat_moves));
 

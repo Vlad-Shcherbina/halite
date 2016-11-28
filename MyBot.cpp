@@ -83,12 +83,23 @@ public:
     static Loc pack(int x, int y) {
         return x + width * y;
     }
+    int x() const {
+        assert(value >= 0 && value < area);
+        return value % width;
+    }
+    int y() const {
+        assert(value >= 0 && value < area);
+        return value / width;
+    }
+    Loc offset(int dx, int dy) const {
+        return pack(
+            (x() + dx + width) % width,
+            (y() + dy + height) % height);
+    }
     hlt::Location as_hlt_loc() const {
-        assert(value >= 0);
-        assert(value < area);
         hlt::Location res;
-        res.x = value % width;
-        res.y = value / width;
+        res.x = x();
+        res.y = y();
         return res;
     }
 private:
@@ -97,8 +108,7 @@ private:
 
 
 ostream& operator<<(ostream &out, Loc loc) {
-    auto hlt_loc = loc.as_hlt_loc();
-    out << "<" << hlt_loc.x << "," << hlt_loc.y << ">";
+    out << "<" << loc.x() << "," << loc.y() << ">";
     return out;
 }
 
@@ -544,27 +554,21 @@ int test_simulate_diamond() {
         for (Loc p = 0; p < area; p++) {
             auto res = simulate_diamond(p, get_move);
             if (res.owner != next_owner[p] || res.strength != next_strength[p]) {
-                auto rel = [p](int dx, int dy) {
-                    auto hlt_loc = p.as_hlt_loc();
-                    return Loc::pack(
-                        (hlt_loc.x + dx + width) % width,
-                        (hlt_loc.y + dy + height) % height);
-                };
                 cout << p << endl;
                 cout << "production       owner       strength            moves"
                      << endl;
                 for (int i = -2; i <= 2; i++) {
                     for (int j = -2; j <= 2; j++)
-                        cout << setw(2) << production[rel(j, i)] << " ";
+                        cout << setw(2) << production[p.offset(j, i)] << " ";
                     cout << "  ";
                     for (int j = -2; j <= 2; j++)
-                        cout << owner[rel(j, i)] << " ";
+                        cout << owner[p.offset(j, i)] << " ";
                     cout << "  ";
                     for (int j = -2; j <= 2; j++)
-                        cout << setw(3) << strength[rel(j, i)] << " ";
+                        cout << setw(3) << strength[p.offset(j, i)] << " ";
                     cout << "  ";
                     for (int j = -2; j <= 2; j++)
-                        cout << (Dir)moves[rel(j, i)] << " ";
+                        cout << (Dir)moves[p.offset(j, i)] << " ";
                     cout << endl;
                 }
                 cout << "Expected: "
@@ -593,14 +597,11 @@ int test_simulate_diamond() {
 
 
 vector<Loc> enumerate_neighborhood(Loc p, int radius) {
-    vector<Loc> result;
     assert(radius >= 0);
-    int x = p.as_hlt_loc().x;
-    int y = p.as_hlt_loc().y;
+    vector<Loc> result;
     for (int dy = -radius; dy <= radius; dy++) {
         for (int dx = -radius + abs(dy); dx <= radius - abs(dy); dx++) {
-            result.push_back(Loc::pack((x + dx + width) % width,
-                                       (y + dy + height) % height));
+            result.push_back(p.offset(dx, dy));
         }
     }
     return result;

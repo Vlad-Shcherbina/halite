@@ -112,6 +112,16 @@ ostream& operator<<(ostream &out, Loc loc) {
     return out;
 }
 
+int dist(Loc p1, Loc p2) {
+    int dx = abs(p1.x() - p2.x());
+    int dy = abs(p1.y() - p2.y());
+    assert(dx < width);
+    dx = min(dx, width - dx);
+    assert(dy < height);
+    dy = min(dy, height - dy);
+    return dx + dy;
+}
+
 array<Loc, 4> neighbors(Loc p) {
     int x = p % width;
     int y = p / width;
@@ -397,7 +407,7 @@ struct DiamondOutcome {
     int evaluate(Loc p) const {
         if (owner == 0)
             return 0;
-        int res = strength + ::production[p];
+        int res = strength + ::production[p] * (experiment ? 3 : 1);
         if (owner == myID)
             return res;
         else
@@ -614,17 +624,54 @@ public:
             result += simulate_diamond(p, get_move_scratch).evaluate(p);
         return result;
     }
+
+    vector<float> evaluate_relative_local(
+        const vector<Loc> &points,
+        const vector<vector<Dir>> &values) {
+        set<Loc> affected_diamonds;
+        for (Loc p : points)
+            for (Loc n : enumerate_neighborhood(p, 2))
+                affected_diamonds.insert(n);
+
+        vector<float> result;
+        for (const auto &value : values) {
+            float score = 0.0;
+            assert(value.size() == points.size());
+            for (int i = 0; i < (int)value.size(); i++)
+                moves_scratch[points[i]] = value[i];
+            for (auto p : affected_diamonds)
+                score += simulate_diamond(p, get_move_scratch).evaluate(p);
+            result.push_back(score);
+        }
+        return result;
+    }
 };
 
 
-vector<Loc> list_combat_pieces() {
+vector<Loc> list_our_combat_pieces() {
     vector<Loc> result;
     for (Loc p = 0; p < area; p++) {
         if (owner[p] != myID)
             continue;
         bool combat = false;
-        for (Loc n : enumerate_neighborhood(p, 2)) {
-            if (owner[n] && owner[n] != owner[p])
+        for (Loc n : enumerate_neighborhood(p, experiment ? 3 : 2)) {
+            if (owner[n] && owner[n] != myID)
+                combat = true;
+        }
+        if (combat)
+            result.push_back(p);
+    }
+    return result;
+}
+
+vector<Loc> list_opp_combat_pieces() {
+    vector<Loc> result;
+    for (Loc p = 0; p < area; p++) {
+        if (owner[p] == 0 || owner[p] == myID)
+            continue;
+        bool combat = false;
+        for (Loc n : enumerate_neighborhood(p, experiment ? 3 : 2)) {
+            if (owner[n] == myID)
                 combat = true;
         }
         if (combat)
@@ -634,12 +681,270 @@ vector<Loc> list_combat_pieces() {
 }
 
 
+
+struct Encoder {
+    int range = 1;
+    vector<pair<Loc, array<int, 5>>> offsets;
+
+    void add(Loc p, array<int, 5> classes) {
+        set<int> all_classes_set(begin(classes), end(classes));
+        vector<int> all_classes(begin(all_classes_set), end(all_classes_set));
+        if (all_classes.size() == 1)
+            return;
+        offsets.emplace_back();
+        offsets.back().first = p;
+        for (int i = 0; i < 5; i++) {
+            int c =
+                find(begin(all_classes), end(all_classes), classes[i]) -
+                begin(all_classes);
+            offsets.back().second[i] = range * c;
+        }
+        range *= all_classes.size();
+    }
+
+    vector<Dir> decode_representative(int x) const {
+        vector<Dir> result(offsets.size(), Dir::still);
+        assert(x >= 0 && x < range);
+        for (int i = (int)offsets.size() - 1; i >= 0; i--) {
+            const auto &q = offsets[i].second;
+            result[i] = (Dir)(find(begin(q), end(q), 0) - begin(q));
+            for (int j = 0; j < 5; j++) {
+                if (q[j] > q[(int)result[i]] && q[j] <= x) {
+                    result[i] = (Dir)j;
+                }
+            }
+            x -= q[(int)result[i]];
+        }
+        assert(x == 0);
+        return result;
+    }
+
+    void apply_to_scratch(const vector<Dir> &dirs) const {
+        assert(dirs.size() == offsets.size());
+        for (int i = 0; i < (int)dirs.size(); i++)
+            moves_scratch[offsets[i].first] = dirs[i];
+    }
+
+    vector<Dir> read_from_scratch() const {
+        vector<Dir> result;
+        result.reserve(offsets.size());
+        for (const auto &off : offsets)
+            result.push_back(moves_scratch[off.first]);
+        return result;
+    }
+
+    int encode(const vector<Dir> &dirs) const {
+        int result = 0;
+        assert(dirs.size() == offsets.size());
+        for (int i = 0; i < (int)dirs.size(); i++)
+            result += offsets[i].second[(int)dirs[i]];
+        return result;
+    }
+};
+
+
+struct DiamondInfo {
+    Loc center;
+
+    Encoder our_encoder;
+    Encoder opp_encoder;
+
+    vector<Loc> enumerate_affected() const {
+        vector<Loc> result;
+        for (const auto &e : {our_encoder, opp_encoder})
+            for (const auto &off : e.offsets)
+                result.push_back(off.first);
+        return result;
+    }
+
+    vector<float> score_matrix;
+    // [our_offset + our_encoder.range * opp_offset]
+
+    vector<float> our_mix_scores;
+    vector<float> opp_mix_scores;
+    int our_mix_count = 0;
+    int opp_mix_count = 0;
+
+    float score_on_scratch(bool our) const {
+        if (our) {
+            int e = our_encoder.encode(our_encoder.read_from_scratch());
+            return our_mix_scores[e] / our_mix_count;
+        } else {
+            int e = opp_encoder.encode(opp_encoder.read_from_scratch());
+            return -opp_mix_scores[e] / opp_mix_count;
+        }
+    }
+
+    void update_mix_from_scratch(bool our) {
+        if (our) {
+            int e = our_encoder.encode(our_encoder.read_from_scratch());
+            opp_mix_count++;
+            for (int i = 0; i < opp_encoder.range; i++)
+                opp_mix_scores[i] += score_matrix[e + i * our_encoder.range];
+        } else {
+            int e = opp_encoder.encode(opp_encoder.read_from_scratch());
+            our_mix_count++;
+            for (int i = 0; i < our_encoder.range; i++)
+                our_mix_scores[i] += score_matrix[i + e * our_encoder.range];
+        }
+    }
+};
+
+array<int, 5> move_classes(Loc center, Loc p) {
+    assert(dist(p, center) <= 2);
+    array<int, 5> result;
+    for (int i = 0; i < 5; i++) {
+        Dir d = (Dir)i;
+        Loc n = d == Dir::still ? p : move_dst(p, d);
+        result[i] = min(dist(center, n), 2);
+    }
+    return result;
+}
+
+map<Loc, DiamondInfo> precompute_diamonds(
+    const vector<Loc> &our_combat_pieces,
+    const vector<Loc> &opp_combat_pieces) {
+
+    map<Loc, DiamondInfo> diamonds;
+    int cnt = 0;
+    for (Loc p = 0; p < area; p++) {
+        vector<Loc> our_pieces;
+        vector<Loc> opp_pieces;
+        for (Loc n : enumerate_neighborhood(p, 2)) {
+            if (binary_search(
+                    begin(our_combat_pieces), end(our_combat_pieces), n))
+                our_pieces.push_back(n);
+            if (binary_search(
+                    begin(opp_combat_pieces), end(opp_combat_pieces), n))
+                opp_pieces.push_back(n);
+        }
+        if (!our_pieces.empty() || !opp_pieces.empty()) {
+            auto &di = diamonds[p] = DiamondInfo();
+            di.center = p;
+            for (Loc n : our_pieces)
+                di.our_encoder.add(n, move_classes(p, n));
+            for (Loc n : opp_pieces)
+                di.opp_encoder.add(n, move_classes(p, n));
+
+            cnt += di.our_encoder.range * di.opp_encoder.range;
+
+            di.score_matrix.resize(di.our_encoder.range * di.opp_encoder.range);
+            for (int opp_offset = 0;
+                 opp_offset < di.opp_encoder.range;
+                 opp_offset++) {
+                vector<Dir> opp_rep =
+                    di.opp_encoder.decode_representative(opp_offset);
+                di.opp_encoder.apply_to_scratch(opp_rep);
+                for (int our_offset = 0;
+                     our_offset < di.our_encoder.range;
+                     our_offset++) {
+                    // TODO: only decode once for efficiency
+                    vector<Dir> our_rep =
+                        di.our_encoder.decode_representative(our_offset);
+                    di.our_encoder.apply_to_scratch(our_rep);
+
+                    di.score_matrix[
+                        our_offset + di.our_encoder.range * opp_offset] =
+                        simulate_diamond(di.center, get_move_scratch)
+                        .evaluate(di.center);
+                }
+            }
+
+            copy(begin(di.score_matrix),
+                 begin(di.score_matrix) + di.our_encoder.range,
+                 back_inserter(di.our_mix_scores));
+            di.our_mix_count = 1;
+
+            di.opp_mix_scores = vector<float>(di.opp_encoder.range, 0.0f);
+            di.opp_mix_count = 0;
+        }
+    }
+    debug(cnt);
+
+    return diamonds;
+}
+
+
+map<Loc, Dir> optimize_diamonds(
+    map<Loc, DiamondInfo> &diamonds,
+    const vector<Loc> &pieces,
+    bool our) {
+
+    map<Loc, vector<Loc>> affected_diamonds;
+    for (const auto &kv : diamonds) {
+        const auto &di = kv.second;
+        for (Loc p : di.enumerate_affected())
+            affected_diamonds[p].push_back(di.center);
+    }
+
+    for (Loc p : pieces)
+        moves_scratch[p] = Dir::still;
+
+    float base_score = 0;
+    for (const auto &kv : diamonds)
+        base_score += kv.second.score_on_scratch(our);
+
+    vector<vector<Loc>> improvement_groups;
+    for (Loc p : pieces)
+        improvement_groups.push_back({p});
+
+    for (int step = 0; step < 3; step++) {
+        for (const auto &group : improvement_groups) {
+            set<Loc> touched_diamonds;
+            for (Loc p : group)
+                touched_diamonds.insert(
+                    begin(affected_diamonds[p]),
+                    end(affected_diamonds[p]));
+
+            vector<vector<Dir>> choices(
+                group.size(),
+                {Dir::still, Dir::north, Dir::east, Dir::south, Dir::west});
+            auto combinations = cartesian_product(choices);
+
+            vector<Dir> best_combination;
+            float best_score = -1e30;
+            for (const auto &combination : combinations) {
+                for (int i = 0; i < (int)group.size(); i++)
+                    moves_scratch[group[i]] = combination[i];
+                float score = 0;
+                for (Loc td : touched_diamonds) {
+                    score += diamonds.at(td).score_on_scratch(our);
+                }
+                //debug2(score, best_score);
+                if (score > best_score) {
+                    best_score = score;
+                    best_combination = combination;
+                }
+            }
+            assert(best_combination.size() == group.size());
+            for (int i = 0; i < (int)group.size(); i++)
+                moves_scratch[group[i]] = best_combination[i];
+        }
+    }
+
+    float final_score = 0;
+    for (const auto &kv : diamonds)
+        final_score += kv.second.score_on_scratch(our);
+
+    debug3(our, base_score, final_score);
+
+    map<Loc, Dir> result;
+    for (Loc p : pieces)
+        if (moves_scratch[p] != Dir::still)
+            result[p] = moves_scratch[p];
+    debug(result);
+
+    for (auto &kv : diamonds)
+        kv.second.update_mix_from_scratch(our);
+
+    return result;
+}
+
+
 map<Loc, Dir> generate_combat_moves(const vector<Loc> &combat_pieces) {
     map<Loc, Dir> result;
     for (Loc p : combat_pieces)
         result[p] = Dir::still;
-
-    auto base_score = OpponentModel().evaluate_board(result);
 
     for (int pass = 0; pass < 3; pass++) {
         for (auto p : combat_pieces) {
@@ -657,7 +962,7 @@ map<Loc, Dir> generate_combat_moves(const vector<Loc> &combat_pieces) {
                 for (Loc n : ns)
                     score += simulate_diamond(n, get_move_scratch).evaluate(n);
                 if (score > best_score) {
-                    debug2(score, best_score);
+                    //debug2(score, best_score);
                     best_score = score;
                     best_move = d;
                 }
@@ -666,10 +971,6 @@ map<Loc, Dir> generate_combat_moves(const vector<Loc> &combat_pieces) {
             result[p] = best_move;
         }
     }
-
-    auto final_score = OpponentModel().evaluate_board(result);
-    debug2(base_score, final_score);
-    assert(final_score >= base_score);
 
     return result;
 }
@@ -696,28 +997,43 @@ int main(int argc, char *argv[]) {
     mt19937 engine;
     discrete_distribution<int> random_move {8, 2, 1, 0, 0};
 
+    uniform_int_distribution<int> num_brown_iterations(20, 25);
+
     while (true) {
         dbg << "-------------" << endl;
         getFrame(presentMap);
         init_globals(presentMap);
         precompute();
 
-        auto combat_pieces = list_combat_pieces();
+        auto combat_pieces = list_our_combat_pieces();
 
         map<Loc, Dir> moves = generate_reinforcement_moves();
-        debug(moves);
+        //debug(moves);
         auto cap = generate_capture_moves(
             {begin(combat_pieces), end(combat_pieces)});
-        debug(cap);
+        //debug(cap);
         moves.insert(begin(cap), end(cap));
 
         ::moves_scratch = vector<Dir>(area, Dir::still);
         for (auto kv : moves)
             moves_scratch[kv.first] = kv.second;
 
-        auto combat_moves = generate_combat_moves(combat_pieces);
-        debug(combat_moves);
-        moves.insert(begin(combat_moves), end(combat_moves));
+        if (experiment) {
+            auto diamonds = precompute_diamonds(
+                combat_pieces, list_opp_combat_pieces());
+            //debug(diamonds.size());
+            int n = num_brown_iterations(engine);
+            auto combat_moves = optimize_diamonds(diamonds, combat_pieces, true);
+            for (int i = 0; i < n; i++) {
+                optimize_diamonds(diamonds, list_opp_combat_pieces(), false);
+                combat_moves = optimize_diamonds(diamonds, combat_pieces, true);
+            }
+            moves.insert(begin(combat_moves), end(combat_moves));
+        } else {
+            auto combat_moves = generate_combat_moves(combat_pieces);
+            //debug(combat_moves);
+            moves.insert(begin(combat_moves), end(combat_moves));
+        }
 
         send_moves(moves);
     }
